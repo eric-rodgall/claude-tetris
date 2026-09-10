@@ -1,0 +1,78 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  triage:
+    # - Ignorar si el "issue" es en realidad un PR
+    # - Ignorar ediciones hechas por bots (evita bucles con los cambios que hace esta acción)
+    # - En "edited" ejecutar solo si cambió el título o el cuerpo; en "opened" siempre
+    if: >
+      github.event.issue.pull_request == null &&
+      !endsWith(github.actor, '[bot]') &&
+      (github.event.action == 'opened' ||
+       github.event.changes.title != null ||
+       github.event.changes.body != null)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: >-
+            --allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh label list:*),Bash(gh label create:*),Bash(gh search:*),Read,Grep,Glob"
+          prompt: |
+            Eres el triador automático de issues de este repositorio (un Tetris en JS vanilla:
+            index.html, style.css, game.js; sin build ni dependencias). Consulta CLAUDE.md para
+            la arquitectura de game.js.
+
+            El issue a analizar es el número ${{ github.event.issue.number }}
+            (evento: ${{ github.event.action }}).
+
+            Haz lo siguiente, en orden:
+
+            1. Lee el issue actual:
+               gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments,author
+
+            2. Explora el código relevante con Read/Grep/Glob (game.js, index.html, style.css)
+               para fundamentar el diagnóstico con archivos y funciones concretos.
+
+            3. Asegura que existen las labels estándar. Para cada una que NO aparezca en
+               `gh label list`, créala:
+                 - bug            (color d73a4a) "Algo no funciona"
+                 - enhancement    (color a2eeef) "Nueva funcionalidad o mejora"
+                 - question       (color d876e3) "Se necesita más información"
+                 - documentation  (color 0075ca) "Mejoras o cambios en documentación"
+                 - help wanted    (color 008672) "Se agradece ayuda externa"
+
+            4. Asigna entre 1 y 3 labels adecuadas SOLO añadiendo (nunca quites labels puestas
+               por personas):
+                 gh issue edit ${{ github.event.issue.number }} --add-label "bug"
+
+            5. Publica UN comentario en español con `gh issue comment ${{ github.event.issue.number }} --body "..."`
+               con exactamente estas secciones en Markdown:
+                 - **Resumen**: 1–2 frases reformulando el problema o la petición.
+                 - **Causa probable / análisis**: qué ocurre y por qué.
+                 - **Archivos y funciones implicados**: rutas y símbolos concretos
+                   (p. ej. `game.js` → `tryRotate`, `collide`).
+                 - **Enfoque de solución propuesto**: pasos concretos para implementar el arreglo.
+                 - **Complejidad estimada**: baja / media / alta, más riesgos o efectos
+                   secundarios (p. ej. mantener sincronizadas las dimensiones del canvas con
+                   COLS/ROWS/BLOCK, o mantener en español los textos visibles).
+
+            6. Si el evento es "edited" y ya hay un comentario de diagnóstico previo tuyo,
+               empieza el nuevo comentario con "**Diagnóstico actualizado tras edición**".
+
+            No modifiques código ni abras PRs; solo etiqueta y comenta.
