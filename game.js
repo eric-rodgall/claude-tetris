@@ -145,10 +145,11 @@ function lockPiece() {
 
 function spawn() {
   current = next;
-  next = randomPiece();
   if (collide(current.shape, current.x, current.y)) {
     endGame();
+    return;
   }
+  next = randomPiece();
   drawNext();
 }
 
