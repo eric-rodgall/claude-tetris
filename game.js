@@ -27,6 +27,7 @@ const PIECES = [
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
+const BOMB_FALL_INTERVAL = 25;
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
@@ -35,12 +36,13 @@ const nextCtx = nextCanvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
+const bombsEl = document.getElementById('bombs');
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, bombs, bombFall;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -150,10 +152,42 @@ function spawn() {
   drawNext();
 }
 
+function bombLandingRow(col, fromRow) {
+  let r = Math.max(fromRow, 0);
+  while (r + 1 < ROWS && !board[r + 1][col]) r++;
+  return r;
+}
+
+function activateBomb() {
+  if (bombs <= 0 || bombFall) return;
+  bombs--;
+
+  const shape = current.shape;
+  const col = Math.min(Math.max(current.x + Math.floor(shape[0].length / 2), 1), COLS - 2);
+  const row = current.y;
+
+  bombFall = { col, row, targetRow: bombLandingRow(col, row), accum: 0 };
+
+  updateHUD();
+}
+
+function explodeBomb() {
+  const { col, targetRow } = bombFall;
+  const startCol = Math.min(Math.max(col - 1, 0), COLS - 3);
+  const startRow = Math.min(Math.max(targetRow - 1, 0), ROWS - 3);
+
+  for (let r = startRow; r < startRow + 3; r++)
+    for (let c = startCol; c < startCol + 3; c++)
+      board[r][c] = 0;
+
+  bombFall = null;
+}
+
 function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  bombsEl.textContent = bombs;
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -205,6 +239,25 @@ function draw() {
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+
+  // falling bomb
+  if (bombFall) drawBomb();
+}
+
+function drawBomb() {
+  const cx = bombFall.col * BLOCK + BLOCK / 2;
+  const cy = bombFall.row * BLOCK + BLOCK / 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, BLOCK * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = '#2b2b33';
+  ctx.fill();
+  ctx.strokeStyle = '#ff5252';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx - BLOCK * 0.12, cy - BLOCK * 0.12, BLOCK * 0.08, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fill();
 }
 
 function drawNext() {
@@ -252,6 +305,17 @@ function loop(ts) {
       lockPiece();
     }
   }
+  if (bombFall) {
+    bombFall.accum += dt;
+    if (bombFall.accum >= BOMB_FALL_INTERVAL) {
+      bombFall.accum = 0;
+      if (bombFall.row < bombFall.targetRow) {
+        bombFall.row++;
+      } else {
+        explodeBomb();
+      }
+    }
+  }
   draw();
   animId = requestAnimationFrame(loop);
 }
@@ -261,6 +325,8 @@ function init() {
   score = 0;
   lines = 0;
   level = 1;
+  bombs = 1;
+  bombFall = null;
   paused = false;
   gameOver = false;
   dropInterval = 1000;
@@ -294,6 +360,9 @@ document.addEventListener('keydown', e => {
     case 'Space':
       e.preventDefault();
       hardDrop();
+      break;
+    case 'KeyB':
+      activateBomb();
       break;
   }
   updateHUD();
